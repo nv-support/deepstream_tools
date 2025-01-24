@@ -24,7 +24,7 @@
 
 ## 3. Prepare model and Run with deepstream-app ##
 
-### TIPS: DeepStream 6.1.1+ is required ###
+### TIPS: DeepStream 7.0+ is required ###
 
 #### Yolov4 
 
