@@ -64,7 +64,7 @@ Below table shows the end-to-end performance of processing 1080p videos with thi
   |yolov9s| Int8  |  16         |    16      |  688    | 608    | 
 
 
- - Note: trtexec cudaGraph not enabled as deepstream not support cudaGraph
+ - Note: * trtexec cudaGraph not enabled as deepstream not support cudaGraph
 
 
 ## Onnx model list
