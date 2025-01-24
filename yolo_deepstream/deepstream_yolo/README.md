@@ -179,7 +179,7 @@ this sample provide two ways of yolov7/yolov8/yolov9/yolov11 post-processing(dec
 - CUDA implement can be found in: [nvdsparsebbox_Yolo_cuda.cu](nvdsinfer_custom_impl_Yolo/nvdsparsebbox_Yolo_cuda.cu)
 
 Default will use CUDA-post processing. To enable CPU post-processing:
-in [config_infer_primary_yoloV7.txt](config_infer_primary_yoloV7.txt), [config_infer_primary_yoloV8.txt](config_infer_primary_yoloV8.txt), [config_infer_primary_yoloV9.txt](config_infer_primary_yoloV9.txt) or [config_infer_primary_yoloV11.txt](config_infer_primary_yoloV11.txt)
+in [config_infer_primary_yoloV7.txt](config_infer_primary_yoloV7.txt), [config_infer_primary_yoloV8.txt](config_infer_primary_yoloV8.txt) or  [config_infer_primary_yoloV9.txt](config_infer_primary_yoloV9.txt)
 
 - `parse-bbox-func-name=NvDsInferParseCustomYoloV7_cuda` -> `parse-bbox-func-name=NvDsInferParseCustomYoloV7`
 - `disable-output-host-copy=1` -> `disable-output-host-copy=0`
