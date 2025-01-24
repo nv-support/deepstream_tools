@@ -16,8 +16,8 @@
 
 ```sh
   $ cd ~/
-  $ git clone https://github.com/NVIDIA-AI-IOT/yolo_deepstream.git
-  $ cd ~/yolo_deepstream/deepstream_yolo/nvdsinfer_custom_impl_Yolo
+  $ git clone https://github.com/NVIDIA-AI-IOT/deepstream_tools.git
+  $ cd ~/deepstream_tools/yolo_deepstream/deepstream_yolo/nvdsinfer_custom_impl_Yolo
   $ make
   $ cd ..
 ```
