@@ -174,7 +174,7 @@ The output result will output to `yolo.mp4`
 
 ## 4. CUDA Post Processing
 
-this sample provide two ways of yolov7/yolov8/yolov9/yolov11 post-processing(decode yolo result, not include NMS), CPU version and GPU version
+this sample provide two ways of yolov7/yolov8/yolov9 post-processing(decode yolo result, not include NMS), CPU version and GPU version
 - CPU implement can be found in: [nvdsparsebbox_Yolo.cpp](nvdsinfer_custom_impl_Yolo/nvdsparsebbox_Yolo.cpp)
 - CUDA implement can be found in: [nvdsparsebbox_Yolo_cuda.cu](nvdsinfer_custom_impl_Yolo/nvdsparsebbox_Yolo_cuda.cu)
 
