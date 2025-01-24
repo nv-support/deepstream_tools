@@ -63,7 +63,8 @@ gpu-id=0
 net-scale-factor=0.0039215697906911373
 #0=RGB, 1=BGR
 model-color-format=0
-onnx-file=yolov7.onnx
+#onnx-file=yolov7.onnx
+model-engine-file=yolov7_qat_640_gpu_b16.engine
 labelfile-path=labels.txt
 ## 0=FP32, 1=INT8, 2=FP16 mode
 network-mode=2
@@ -77,15 +78,14 @@ maintain-aspect-ratio=1
 symmetric-padding=1
 ## Bilinear Interpolation
 scaling-filter=1
-#parse-bbox-func-name=NvDsInferParseCustomYoloV7
+# parse-bbox-func-name=NvDsInferParseCustomYoloV7
 parse-bbox-func-name=NvDsInferParseCustomYoloV7_cuda
-#disable-output-host-copy=0
+# disable-output-host-copy=0
 disable-output-host-copy=1
 custom-lib-path=nvdsinfer_custom_impl_Yolo/libnvdsinfer_custom_impl_Yolo.so
 #scaling-compute-hw=0
 ## start from DS6.2
 crop-objects-to-roi-boundary=1
-
 
 
 [class-attrs-all]

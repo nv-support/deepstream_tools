@@ -21,7 +21,7 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
-#include <Yolov7.h>
+#include <Yolo.h>
 #include <vector>
 #include <numeric>
 #include <random>
@@ -31,6 +31,7 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <argsParser.h>
+#include <iostream>
 
 
 std::string parse_video_path(argsParser& cmdLine) {
@@ -46,13 +47,20 @@ std::string parse_model_path(argsParser& cmdLine) {
     if (engine_path_str) engine_path = std::string(engine_path_str);
     return engine_path;
 }
+std::string parse_yolov_version(argsParser& cmdLine) {
+    const char* version_str = cmdLine.ParseString("version");
+    std::string version;
+    if (version_str) version = std::string(version_str);
+    return version;
+}
 
 bool print_help() {
     printf("--------------------------------------------------------------------------------------------------------\n");
-    printf("---------------------------- yolov7 images detector ---------------------------------------------\n");
+    printf("---------------------------- yolo images detector ---------------------------------------------\n");
     printf(" '--help': print help information \n");
-    printf(" '--engine=yolov7.engine' Load yolov7 trt-engine  \n");
+    printf(" '--engine=yolo.engine' Load yolo trt-engine  \n");
     printf(" '--video=video.mp4' specify the path of the video \n");
+    printf(" '--version=v7' Run yolov7/v8/v9, default v7  \n");
     return true;
 }
 
@@ -65,8 +73,15 @@ int main(int argc, char** argv){
 
     std::string engine_path = parse_model_path(cmdLine);
     std::string video_path = parse_video_path(cmdLine);
-    
-    Yolov7 yolov7(engine_path);
+    std::string yolo_version = parse_yolov_version(cmdLine);
+    bool isYolov7 = true;
+    if(yolo_version == "v8" || yolo_version == "v9"){
+        isYolov7 = false;
+    }
+    else{
+        isYolov7 = true;
+    }
+    Yolo yolo(engine_path);
 
     cv::VideoCapture capture;
     cv::Mat frame;
@@ -85,10 +100,10 @@ int main(int argc, char** argv){
     int i = 0;
     while (capture.read(frame)){
         framev.push_back(frame);
-        yolov7.preProcess(framev);
-        yolov7.infer();
-        nmsresults = yolov7.PostProcess();
-        Yolov7::DrawBoxesonGraph(frame,nmsresults[0]);
+        yolo.preProcess(framev);
+        yolo.infer();
+        nmsresults = yolo.PostProcess(0.45f, 0.25f, isYolov7);
+        Yolo::DrawBoxesonGraph(frame,nmsresults[0]);
         writer.write(frame);
         framev.clear();
         i++;

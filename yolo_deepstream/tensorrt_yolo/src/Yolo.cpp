@@ -23,7 +23,7 @@
  */
 
 
-#include "Yolov7.h"
+#include "Yolo.h"
 
 static const char* cocolabels[] = {
     "person", "bicycle", "car", "motorcycle", "airplane",
@@ -41,7 +41,7 @@ static const char* cocolabels[] = {
     "scissors", "teddy bear", "hair drier", "toothbrush"
 };
 
-Yolov7::Yolov7(std::string engine_path) {
+Yolo::Yolo(std::string engine_path) {
 
     this->mTotal_inference_time = 0;
     this->mInference_count = 0;
@@ -58,17 +58,17 @@ Yolov7::Yolov7(std::string engine_path) {
     std::ifstream fin(engine_path, std::ios::binary);
     std::vector<char> inBuffer((std::istreambuf_iterator<char>(fin)), std::istreambuf_iterator<char>());
     fin.close();
-    mEngine.reset(mRuntime->deserializeCudaEngine(inBuffer.data(), inBuffer.size(), nullptr));
+    mEngine.reset(mRuntime->deserializeCudaEngine(inBuffer.data(), inBuffer.size()));
     mContext.reset(mEngine->createExecutionContext());
     mImgPushed = 0;
     /*
        malloc cuda memory for binding
     */
-    const int nbBindings = this->mEngine->getNbBindings();
+    const int nbBindings = this->mEngine->getNbIOTensors();
 
-    this->mDynamicBatch =  this->mEngine->getBindingDimensions(0).d[0] == -1 ? true:false;
+    this->mDynamicBatch =  this->mEngine->getTensorShape(mEngine->getIOTensorName(0)).d[0] == -1 ? true:false;
     for (int i = 0; i < nbBindings; i++) {
-        const auto dataType = this->mEngine->getBindingDataType(i);
+        const auto dataType = this->mEngine->getTensorDataType(mEngine->getIOTensorName(i));
         const int elemSize = [&]() -> int {
             switch (dataType) {
             case nvinfer1::DataType::kFLOAT:
@@ -83,29 +83,33 @@ Yolov7::Yolov7(std::string engine_path) {
         nvinfer1::Dims dims;
 
         //input
-        if (mEngine->bindingIsInput(i)) {
+        if (mEngine->getTensorIOMode(mEngine->getIOTensorName(i)) == nvinfer1::TensorIOMode::kINPUT) {
             if(this->mDynamicBatch) 
-                dims = mEngine->getProfileDimensions(i, 0, nvinfer1::OptProfileSelector::kMAX);
+                dims = mEngine->getProfileShape(mEngine->getIOTensorName(i), 0, nvinfer1::OptProfileSelector::kMAX);
             else
-                dims = mEngine->getBindingDimensions(i);
+                dims = mEngine->getTensorShape(mEngine->getIOTensorName(i));
             this->mInputDim = dims;
         }
         else{ // output
-            dims = mEngine->getBindingDimensions(i);
+            dims = mEngine->getTensorShape(mEngine->getIOTensorName(i));
             //if dynamic batch, change dim[0] to max-batchsize of input
             if(this->mDynamicBatch)
-                dims.d[0] = mEngine->getProfileDimensions(0, 0, nvinfer1::OptProfileSelector::kMAX).d[0];
+                dims.d[0] = mEngine->getProfileShape(mEngine->getIOTensorName(i), 0, nvinfer1::OptProfileSelector::kMAX).d[0];
 
             this->mOutputDim = dims;
         }
         const int bindingSize = elemSize * std::accumulate(dims.d, &dims.d[dims.nbDims], 1, std::multiplies<int>{});
-        if (mEngine->bindingIsInput(i)) //intput
+        if (mEngine->getTensorIOMode(mEngine->getIOTensorName(i)) == nvinfer1::TensorIOMode::kINPUT) //intput
             mImgBufferSize = bindingSize / dims.d[0];
         else //output
             mHostOutputBuffer.resize(bindingSize / elemSize);
 
         this->mBindings.emplace_back(mallocCudaMem<char>(bindingSize));
         this->mBindingArray.emplace_back(mBindings.back().get());
+        if(!mContext->setTensorAddress(mEngine->getIOTensorName(i), this->mBindingArray[i])){
+            printf("Failed to set tensor address for tensor %s\n", mEngine->getIOTensorName(i));
+        return;
+      }
     }
     mMaxBatchSize = mInputDim.d[0];
 
@@ -117,16 +121,16 @@ Yolov7::Yolov7(std::string engine_path) {
     return;
 }
 
-void Yolov7::ReportArgs() {
+void Yolo::ReportArgs() {
     std::cout << "--------------------------------------------------------" << std::endl;
-    std::cout << "Yolov7 initialized from: " << mEnginePath << std::endl;
-    const int nbBindings = mEngine->getNbBindings();
+    std::cout << "Yolo initialized from: " << mEnginePath << std::endl;
+    const int nbBindings = mEngine->getNbIOTensors();
     for (int i = 0; i < nbBindings; i++) {
-        const auto dims = mEngine->getBindingDimensions(i);
-        if (mEngine->bindingIsInput(i))
-            std::cout << "input : " << mEngine->getBindingName(i);
+        const auto dims = mEngine->getTensorShape(mEngine->getIOTensorName(i));
+        if (mEngine->getTensorIOMode(mEngine->getIOTensorName(i)) == nvinfer1::TensorIOMode::kINPUT)
+            std::cout << "input : " << mEngine->getIOTensorName(i);
         else
-            std::cout << "output : " << mEngine->getBindingName(i);
+            std::cout << "output : " << mEngine->getIOTensorName(i);
         std::cout << " , shape : [ ";
         for (int j = 0; j < dims.nbDims; j++) std::cout << dims.d[j] << ",";
         std::cout << "]" << std::endl;
@@ -145,7 +149,7 @@ static void hwc_to_chw(cv::InputArray src, cv::OutputArray dst) {
   cv::hconcat( channels, dst );
 }
 
-std::vector<cv::Mat> Yolov7::preProcess(std::vector<cv::Mat> &cv_img) {
+std::vector<cv::Mat> Yolo::preProcess(std::vector<cv::Mat> &cv_img) {
     if(cv_img.size() > mInputDim.d[0] || cv_img.size() <=0) {
         std::cerr<<"error cv_img.size() in "<<__FUNCTION__<<std::endl;
     }
@@ -178,7 +182,7 @@ std::vector<cv::Mat> Yolov7::preProcess(std::vector<cv::Mat> &cv_img) {
     }
     return nchwMats;
 }
-std::vector<cv::Mat> Yolov7::preProcess4Validate(std::vector<cv::Mat> &cv_img) {
+std::vector<cv::Mat> Yolo::preProcess4Validate(std::vector<cv::Mat> &cv_img) {
     std::vector<cv::Mat> nchwMats;
     if(cv_img.size() > mInputDim.d[0] || cv_img.size() <=0) {
         std::cerr<<"error cv_img.size() in "<<__FUNCTION__<<std::endl;
@@ -220,7 +224,7 @@ std::vector<cv::Mat> Yolov7::preProcess4Validate(std::vector<cv::Mat> &cv_img) {
     return nchwMats;
     
 }
-int Yolov7::pushImg(void *imgBuffer, int numImg, bool fromCPU) {
+int Yolo::pushImg(void *imgBuffer, int numImg, bool fromCPU) {
     if(mImgPushed + numImg > mMaxBatchSize) {
         std::cerr <<" error: mImgPushed = "<< mImgPushed <<" numImg = "<<numImg<<" mMaxBatchSize= "<< mMaxBatchSize<<", mImgPushed + numImg > mMaxBatchSize "<<std::endl;
     }
@@ -235,7 +239,7 @@ int Yolov7::pushImg(void *imgBuffer, int numImg, bool fromCPU) {
     return 0;
 }
 
-int Yolov7::infer() {
+int Yolo::infer() {
     if(mImgPushed == 0){
         std::cerr <<" error: mImgPushed = "<< mImgPushed <<"  ,mImgPushed == 0!"<<std::endl;
         return -1;
@@ -244,10 +248,10 @@ int Yolov7::infer() {
 
     if(mDynamicBatch) {
         inferDims.d[0] = mImgPushed;
-        this->mContext->setBindingDimensions(0, inferDims);
+        this->mContext->setInputShape(mEngine->getIOTensorName(0), inferDims);
     }
 
-    if (!mContext->enqueueV2(mBindingArray.data(), mStream.get(), NULL)) {
+    if (!mContext->enqueueV3(mStream.get())) {
         std::cout << "failed to enqueue TensorRT context on device "<< std::endl;
         return -1;
     }
@@ -262,14 +266,14 @@ int Yolov7::infer() {
 }
 
 
-nvinfer1::Dims Yolov7::getInputDim() {
+nvinfer1::Dims Yolo::getInputDim() {
     return mInputDim;
 }
 
-nvinfer1::Dims Yolov7::getOutputDim() {
+nvinfer1::Dims Yolo::getOutputDim() {
     return mOutputDim;
 }
-std::vector<std::vector<std::vector<float>>> Yolov7::decode_yolov7_result(float conf_thres) {
+std::vector<std::vector<std::vector<float>>> Yolo::decode_yolov7_result(float conf_thres) {
     // for now, copy all buffer to host
     std::vector<std::vector<std::vector<float>>> all_bboxes;
     if(cudaSuccess != cudaMemcpyAsync((void*)(mHostOutputBuffer.data()),this->mBindings[1].get() , sizeof(float) * mHostOutputBuffer.size(), cudaMemcpyDeviceToHost)){
@@ -325,7 +329,59 @@ std::vector<std::vector<std::vector<float>>> Yolov7::decode_yolov7_result(float 
     return all_bboxes;
 }
 
-std::vector<std::vector<float>> Yolov7::nms(std::vector<std::vector<float>> &bboxes, float iou_thres) {
+std::vector<std::vector<std::vector<float>>> Yolo::decode_yolov8v9_result(float conf_thres) {
+    // for now, copy all buffer to host
+    std::vector<std::vector<std::vector<float>>> all_bboxes;
+    if(cudaSuccess != cudaMemcpyAsync((void*)(mHostOutputBuffer.data()),this->mBindings[1].get() , sizeof(float) * mHostOutputBuffer.size(), cudaMemcpyDeviceToHost)){
+        std::cerr<<"error cv_img.size() in "<<__FUNCTION__<<std::endl;
+        return all_bboxes;// blank result
+    }
+    std::vector<std::vector<float>> bboxes;
+    float *h_one_output;
+    for(int j = 0; j < md2i.size();j++){
+        bboxes.clear();
+        h_one_output = mHostOutputBuffer.data() + j * std::accumulate(&mOutputDim.d[1], &mOutputDim.d[mOutputDim.nbDims], 1, std::multiplies<int>{});
+        // float conf_thres = 0.4;
+
+        int output_numbox = mOutputDim.d[1];
+        int output_numprob = mOutputDim.d[2];
+        int num_classes = output_numprob - 4;
+
+        for(int i = 0; i < output_numbox; ++i){
+            float* ptr = h_one_output + i * output_numprob;
+
+            float* pclass = ptr + 4;
+            int label     = std::max_element(pclass, pclass + num_classes) - pclass;
+            float prob    = pclass[label];
+            float confidence = prob;
+            if(confidence < conf_thres)
+                continue;
+            // center point, width, height
+            float cx     = ptr[0];
+            float cy     = ptr[1];
+            float width  = ptr[2];
+            float height = ptr[3];
+
+            // predict box
+            float left   = cx - width * 0.5;
+            float top    = cy - height * 0.5;
+            float right  = cx + width * 0.5;
+            float bottom = cy + height * 0.5;
+
+            // the position on the picture
+            float image_base_left   = md2i[j][0] * left   + md2i[j][2];
+            float image_base_right  = md2i[j][0] * right  + md2i[j][2];
+            float image_base_top    = md2i[j][0] * top    + md2i[j][5];
+            float image_base_bottom = md2i[j][0] * bottom + md2i[j][5];
+            bboxes.push_back({image_base_left, image_base_top, image_base_right, image_base_bottom, (float)label, confidence});
+        }
+        all_bboxes.push_back(bboxes);
+    }
+    md2i.clear();
+    return all_bboxes;
+}
+
+std::vector<std::vector<float>> Yolo::nms(std::vector<std::vector<float>> &bboxes, float iou_thres) {
     std::sort(bboxes.begin(), bboxes.end(), [](std::vector<float>& a, std::vector<float>& b){return a[5] > b[5];});
     std::vector<bool> remove_flags(bboxes.size());
     std::vector<std::vector<float>> box_result;
@@ -362,7 +418,7 @@ std::vector<std::vector<float>> Yolov7::nms(std::vector<std::vector<float>> &bbo
     }
     return box_result;
 }
-std::vector<std::vector<std::vector<float>>> Yolov7::yolov7_nms(std::vector<std::vector<std::vector<float>>> &bboxes, float iou_thres) {
+std::vector<std::vector<std::vector<float>>> Yolo::yolo_nms(std::vector<std::vector<std::vector<float>>> &bboxes, float iou_thres) {
     std::vector<std::vector<std::vector<float>>> nms_result;
     for(int i = 0;i < bboxes.size();i++) {
         nms_result.push_back(this->nms(bboxes[i], iou_thres));
@@ -370,11 +426,15 @@ std::vector<std::vector<std::vector<float>>> Yolov7::yolov7_nms(std::vector<std:
     return nms_result;
 }
 
-std::vector<std::vector<std::vector<float>>> Yolov7::PostProcess(float iou_thres, float conf_thres){
+std::vector<std::vector<std::vector<float>>> Yolo::PostProcess(float iou_thres, float conf_thres, bool isYolov7){
     std::vector<std::vector<std::vector<float>>> PostProcessingResult;
     //decode & nms
-    std::vector<std::vector<std::vector<float>>> decode_result = this->decode_yolov7_result(conf_thres);
-    PostProcessingResult = this->yolov7_nms(decode_result, iou_thres);    
+    std::vector<std::vector<std::vector<float>>> decode_result;
+    if(isYolov7)
+        decode_result = this->decode_yolov7_result(conf_thres);
+    else
+        decode_result = this->decode_yolov8v9_result(conf_thres);
+    PostProcessingResult = this->yolo_nms(decode_result, iou_thres);
     return PostProcessingResult;
 }
 
@@ -402,7 +462,7 @@ static std::tuple<uint8_t, uint8_t, uint8_t> random_color(int id){
     return hsv2bgr(h_plane, s_plane, 1);
 }
 
-static int Yolov7::DrawBoxesonGraph(cv::Mat &bgr_img, std::vector<std::vector<float>> nmsresult){
+static int Yolo::DrawBoxesonGraph(cv::Mat &bgr_img, std::vector<std::vector<float>> nmsresult){
     for(int i = 0; i < nmsresult.size(); ++i){
         auto& ibox = nmsresult[i];
         float left = ibox[0];

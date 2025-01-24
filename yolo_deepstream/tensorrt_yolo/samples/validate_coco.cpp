@@ -21,7 +21,7 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
-#include <Yolov7.h>
+#include <Yolo.h>
 #include <vector>
 #include <numeric>
 #include <random>
@@ -47,13 +47,20 @@ std::string parse_coco_path(argsParser& cmdLine) {
     if (coco_path_str) coco_path = std::string(coco_path_str);
     return coco_path;
 }
+std::string parse_yolov_version(argsParser& cmdLine) {
+    const char* version_str = cmdLine.ParseString("version");
+    std::string version;
+    if (version_str) version = std::string(version_str);
+    return version;
+}
 
 bool print_help() {
     printf("--------------------------------------------------------------------------------------------------------\n");
-    printf("---------------------------- yolov7 coco validate tool ---------------------------------------------\n");
+    printf("---------------------------- yolo coco validate tool ---------------------------------------------\n");
     printf(" '--help': print help information \n");
-    printf(" '--engine=yolov7.engine' Load yolov7 trt-engine  \n");
+    printf(" '--engine=yolo.engine' Load yolo trt-engine  \n");
     printf(" '--coco=./data/coco/' specify the path of the coco dataset\n");
+    printf(" '--version=v7' Run yolov7/v8/v9, default v7  \n");
     return true;
 }
 
@@ -112,15 +119,24 @@ int main(int argc, char** argv){
 
     std::string engine_path = parse_model_path(cmdLine);
     std::string coco_path = parse_coco_path(cmdLine);
+    std::string yolo_version = parse_yolov_version(cmdLine);
+    bool isYolov7 = true;
+    if(yolo_version == "v8" || yolo_version == "v9"){
+        isYolov7 = false;
+    }
+    else{
+        isYolov7 = true;
+    }
 
     coco_path += "/val2017.txt";
-    Yolov7 yolov7(engine_path);
+    Yolo yolo(engine_path);
 
     // containor fr
     std::vector<cv::Mat> bgr_imgs;
     std::vector<std::string> imgPathList = readCocoPaths(coco_path);;
     std::vector<std::vector<std::vector<float>>> batchNmsResult;
-    int maxBatchsize = yolov7.getInputDim().d[0];
+    int maxBatchsize = yolo.getInputDim().d[0];
+    int resolution = yolo.getInputDim().d[2];
 
     
     Json::Value root;
@@ -132,15 +148,26 @@ int main(int argc, char** argv){
             cv::Mat one_img = cv::imread(imgPathList[i]);
             bgr_imgs.push_back(one_img);
         }
-
-        std::vector<cv::Mat> nchwMats = yolov7.preProcess4Validate(bgr_imgs);
+        std::vector<cv::Mat> nchwMats;
+        if(640 == resolution){
+            nchwMats= yolo.preProcess(bgr_imgs);
+        }
+        else if (672 == resolution)
+        {
+            nchwMats = yolo.preProcess4Validate(bgr_imgs);
+        }
+        else{
+            std::err << "the resolution must be 672 or 640, but got  :"<< resolution <<std::endl;
+        }
+        
+        nchwMats = yolo.preProcess(bgr_imgs);
 
         printf("\r%d / %d", i, imgPathList.size());
         fflush(stdout);
         
-        yolov7.infer();
+        yolo.infer();
         
-        batchNmsResult = yolov7.PostProcess(0.65, 0.001);
+        batchNmsResult = yolo.PostProcess(0.65, 0.001, isYolov7);
 
         for(int j = 0; j< batchNmsResult.size();j++){
             int imgth = i - batchNmsResult.size() + j;

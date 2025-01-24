@@ -23,7 +23,7 @@
 import sys
 import os
 
-# Add the current directory to PYTHONPATH for YoloV7
+# Add the current directory to PYTHONPATH for yolov5s
 sys.path.insert(0, os.path.abspath("."))
 pydir = os.path.dirname(__file__)
 
@@ -38,15 +38,16 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-# YoloV7
-import test
+# yolov5s
+import val
 from models.yolo import Model
 from models.common import Conv
-from utils.datasets import create_dataloader
-from utils.google_utils import attempt_download
-from utils.general import init_seeds
+from utils.dataloaders import create_dataloader
+from utils.downloads import attempt_download
+from utils.general import init_seeds, check_dataset
 
 import quantization.quantize as quantize
+from copy import deepcopy
 
 # Disable all warning
 warnings.filterwarnings("ignore")
@@ -62,8 +63,8 @@ class SummaryTool:
         json.dump(self.data, open(self.file, "w"), indent=4)
 
 
-# Load YoloV7 Model
-def load_yolov7_model(weight, device) -> Model:
+# Load yolov5s Model
+def load_yolov5s_model(weight, device) -> Model:
 
     attempt_download(weight)
     model = torch.load(weight, map_location=device)["model"]
@@ -83,14 +84,13 @@ def load_yolov7_model(weight, device) -> Model:
 
 def create_coco_train_dataloader(cocodir, batch_size=10):
 
-    with open("data/hyp.scratch.p5.yaml") as f:
+    with open("data/hyps/hyp.scratch-low.yaml") as f:
         hyp = yaml.load(f, Loader=yaml.SafeLoader)  # load hyps
 
     loader = create_dataloader(
         f"{cocodir}/train2017.txt", 
         imgsz=640, 
         batch_size=batch_size, 
-        opt=collections.namedtuple("Opt", "single_cls")(False),
         augment=True, hyp=hyp, rect=False, cache=False, stride=32,pad=0, image_weights=False)[0]
     return loader
 
@@ -101,7 +101,6 @@ def create_coco_val_dataloader(cocodir, batch_size=10, keep_images=None):
         f"{cocodir}/val2017.txt", 
         imgsz=640, 
         batch_size=batch_size, 
-        opt=collections.namedtuple("Opt", "single_cls")(False),
         augment=False, hyp=None, rect=True, cache=False,stride=32,pad=0.5, image_weights=False)[0]
 
     def subclass_len(self):
@@ -117,15 +116,16 @@ def evaluate_coco(model, dataloader, using_cocotools = False, save_dir=".", conf
 
     if save_dir and os.path.dirname(save_dir) != "":
         os.makedirs(os.path.dirname(save_dir), exist_ok=True)
-
-    return test.test(
-        "data/coco.yaml", 
+    
+    model = deepcopy(model)
+    return val.run(
+        check_dataset("data/coco.yaml"), 
         save_dir=Path(save_dir),
-        dataloader=dataloader, conf_thres=conf_thres,iou_thres=iou_thres,model=model,is_coco=True,
-        plots=False,half_precision=True,save_json=using_cocotools)[0][3]
+        dataloader=dataloader, conf_thres=conf_thres,iou_thres=iou_thres,model=model,
+        plots=False,save_json=using_cocotools)[0][3]
     
 
-def export_onnx(model : Model, file, size=640, dynamic_batch=False):
+def export_onnx(model : Model, file, size=640, dynamic_batch=False, noanchor=False):
 
     device = next(model.parameters()).device
     model.float()
@@ -133,12 +133,27 @@ def export_onnx(model : Model, file, size=640, dynamic_batch=False):
     dummy = torch.zeros(1, 3, size, size, device=device)
     model.model[-1].concat = True
     grid_old_func = model.model[-1]._make_grid
-    model.model[-1]._make_grid = lambda *args: torch.from_numpy(grid_old_func(*args).data.numpy())
+    model.model[-1]._make_grid = lambda *args: [torch.from_numpy(item.cpu().data.numpy()).to(item.device) for item in grid_old_func(*args)]
+    
+    if noanchor:
+        def hook_forward(self, x):
+            for i in range(self.nl):
+                x[i] = self.m[i](x[i])
+                bs, _, ny, nx = map(int, x[i].shape)
+                x[i] = x[i].view(bs, self.na, self.no, ny * nx).permute(0, 1, 3, 2).contiguous()
+            return x
 
-    quantize.export_onnx(model, dummy, file, opset_version=13, 
-        input_names=["images"], output_names=["outputs"], 
-        dynamic_axes={"images": {0: "batch"}, "outputs": {0: "batch"}} if dynamic_batch else None
-    )
+        model.model[-1].__class__.forward = hook_forward
+
+        quantize.export_onnx(model, dummy, file, opset_version=13, 
+            input_names=["images"], output_names=["s8", "s16", "s32"], 
+            dynamic_axes={"images": {0: "batch"}, "s32": {0: "batch"}, "s16": {0: "batch"}, "s8": {0: "batch"}} if dynamic_batch else None
+        )
+    else:
+        quantize.export_onnx(model, dummy, file, opset_version=13, 
+            input_names=["images"], output_names=["outputs"], 
+            dynamic_axes={"images": {0: "batch"}, "outputs": {0: "batch"}} if dynamic_batch else None
+        )
     model.model[-1].concat = False
     model.model[-1]._make_grid = grid_old_func
 
@@ -153,9 +168,10 @@ def cmd_quantize(weight, cocodir, device, ignore_policy, save_ptq, save_qat, sup
         os.makedirs(os.path.dirname(save_qat), exist_ok=True)
     
     device  = torch.device(device)
-    model   = load_yolov7_model(weight, device)
+    model   = load_yolov5s_model(weight, device)
     train_dataloader = create_coco_train_dataloader(cocodir)
     val_dataloader   = create_coco_val_dataloader(cocodir)
+    quantize.replace_bottleneck_forward(model)
     quantize.replace_to_quantization_module(model, ignore_policy=ignore_policy)
     quantize.apply_custom_rules_to_quantizer(model, export_onnx)
     quantize.calibrate_model(model, train_dataloader, device)
@@ -220,7 +236,7 @@ def cmd_quantize(weight, cocodir, device, ignore_policy, save_ptq, save_qat, sup
         preprocess=preprocess, supervision_policy=supervision_policy())
 
 
-def cmd_export(weight, save, size, dynamic):
+def cmd_export(weight, save, size, dynamic, noanchor, noqadd):
     
     quantize.initialize()
     if save is None:
@@ -228,7 +244,11 @@ def cmd_export(weight, save, size, dynamic):
         name = name[:name.rfind('.')]
         save = os.path.join(os.path.dirname(weight), name + ".onnx")
         
-    export_onnx(torch.load(weight, map_location="cpu")["model"], save, size, dynamic_batch=dynamic)
+    model = torch.load(weight, map_location="cpu")["model"]
+    if not noqadd:
+        quantize.replace_bottleneck_forward(model)
+
+    export_onnx(model, save, size, dynamic_batch=dynamic, noanchor=noanchor)
     print(f"Save onnx to {save}")
 
 
@@ -236,11 +256,11 @@ def cmd_sensitive_analysis(weight, device, cocodir, summary_save, num_image):
 
     quantize.initialize()
     device  = torch.device(device)
-    model   = load_yolov7_model(weight, device)
+    model   = load_yolov5s_model(weight, device)
     train_dataloader = create_coco_train_dataloader(cocodir)
     val_dataloader   = create_coco_val_dataloader(cocodir, keep_images=None if num_image is None or num_image < 1 else num_image)
     quantize.replace_to_quantization_module(model)
-    quantize.calibrate_model(model, train_dataloader, device)
+    quantize.calibrate_model(model, train_dataloader)
 
     summary = SummaryTool(summary_save)
     print("Evaluate PTQ...")
@@ -268,7 +288,7 @@ def cmd_sensitive_analysis(weight, device, cocodir, summary_save, num_image):
 def cmd_test(weight, device, cocodir, confidence, nmsthres):
 
     device  = torch.device(device)
-    model   = load_yolov7_model(weight, device)
+    model   = load_yolov5s_model(weight, device)
     val_dataloader   = create_coco_val_dataloader(cocodir)
     evaluate_coco(model, val_dataloader, True, conf_thres=confidence, iou_thres=nmsthres)
 
@@ -278,16 +298,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='qat.py')
     subps  = parser.add_subparsers(dest="cmd")
     exp    = subps.add_parser("export", help="Export weight to onnx file")
-    exp.add_argument("weight", type=str, default="yolov7.pt", help="export pt file")
+    exp.add_argument("weight", type=str, default="yolov5s.pt", help="export pt file")
     exp.add_argument("--save", type=str, required=False, help="export onnx file")
     exp.add_argument("--size", type=int, default=640, help="export input size")
     exp.add_argument("--dynamic", action="store_true", help="export dynamic batch")
+    exp.add_argument("--noanchor", action="store_true", help="export no anchor nodes")
+    exp.add_argument("--noqadd", action="store_true", help="export do not add QuantAdd")
 
     qat = subps.add_parser("quantize", help="PTQ/QAT finetune ...")
-    qat.add_argument("weight", type=str, nargs="?", default="yolov7.pt", help="weight file")
+    qat.add_argument("weight", type=str, nargs="?", default="yolov5s.pt", help="weight file")
     qat.add_argument("--cocodir", type=str, default="/datav/dataset/coco", help="coco directory")
     qat.add_argument("--device", type=str, default="cuda:0", help="device")
-    qat.add_argument("--ignore-policy", type=str, default="model\.105\.m\.(.*)", help="regx")
+    qat.add_argument("--ignore-policy", type=str, default="model\.24\.m\.(.*)", help="regx")
     qat.add_argument("--ptq", type=str, default="ptq.pt", help="file")
     qat.add_argument("--qat", type=str, default=None, help="file")
     qat.add_argument("--supervision-stride", type=int, default=1, help="supervision stride")
@@ -296,14 +318,14 @@ if __name__ == "__main__":
     qat.add_argument("--eval-ptq", action="store_true", help="do eval for ptq model")
 
     sensitive = subps.add_parser("sensitive", help="Sensitive layer analysis")
-    sensitive.add_argument("weight", type=str, nargs="?", default="yolov7.pt", help="weight file")
+    sensitive.add_argument("weight", type=str, nargs="?", default="yolov5s.pt", help="weight file")
     sensitive.add_argument("--device", type=str, default="cuda:0", help="device")
     sensitive.add_argument("--cocodir", type=str, default="/datav/dataset/coco", help="coco directory")
     sensitive.add_argument("--summary", type=str, default="sensitive-summary.json", help="summary save file")
     sensitive.add_argument("--num-image", type=int, default=None, help="number of image to evaluate")
 
     testcmd = subps.add_parser("test", help="Do evaluate")
-    testcmd.add_argument("weight", type=str, default="yolov7.pt", help="weight file")
+    testcmd.add_argument("weight", type=str, default="yolov5s.pt", help="weight file")
     testcmd.add_argument("--cocodir", type=str, default="/datav/dataset/coco", help="coco directory")
     testcmd.add_argument("--device", type=str, default="cuda:0", help="device")
     testcmd.add_argument("--confidence", type=float, default=0.001, help="confidence threshold")
@@ -313,7 +335,7 @@ if __name__ == "__main__":
     init_seeds(57)
 
     if args.cmd == "export":
-        cmd_export(args.weight, args.save, args.size, args.dynamic)
+        cmd_export(args.weight, args.save, args.size, args.dynamic, args.noanchor, args.noqadd)
     elif args.cmd == "quantize":
         print(args)
         cmd_quantize(

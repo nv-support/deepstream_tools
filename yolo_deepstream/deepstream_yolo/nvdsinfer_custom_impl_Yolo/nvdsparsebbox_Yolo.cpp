@@ -90,14 +90,13 @@ static void addBBoxProposalYoloV4(const float bx, const float by, const float bw
 
 static std::vector<NvDsInferParseObjectInfo>
 decodeYoloV4Tensor(
-    const float* boxes, const float* scores,
+    const float* boxes, const float* scores, const float* classes,
     const uint num_bboxes, NvDsInferParseDetectionParams const& detectionParams,
     const uint& netW, const uint& netH)
 {
     std::vector<NvDsInferParseObjectInfo> binfo;
 
     uint bbox_location = 0;
-    uint score_location = 0;
     for (uint b = 0; b < num_bboxes; ++b)
     {
         float bx1 = boxes[bbox_location];
@@ -105,26 +104,20 @@ decodeYoloV4Tensor(
         float bx2 = boxes[bbox_location + 2];
         float by2 = boxes[bbox_location + 3];
 
-        float maxProb = 0.0f;
-        int maxIndex = -1;
+	int class_id = (int)classes[b];
 
-        for (uint c = 0; c < detectionParams.numClassesConfigured; ++c)
+        if (class_id < detectionParams.numClassesConfigured && class_id >=0)
         {
-            float prob = scores[score_location + c];
-            if (prob > maxProb)
+            float prob = scores[b];
+            if (prob > detectionParams.perClassPreclusterThreshold[class_id])
             {
-                maxProb = prob;
-                maxIndex = c;
+                addBBoxProposalYoloV4(bx1, by1, bx2, by2, netW, netH, class_id, prob, binfo);
             }
+
         }
 
-        if (maxProb > detectionParams.perClassPreclusterThreshold[maxIndex])
-        {
-            addBBoxProposalYoloV4(bx1, by1, bx2, by2, netW, netH, maxIndex, maxProb, binfo);
-        }
 
         bbox_location += 4;
-        score_location += detectionParams.numClassesConfigured;
     }
 
     return binfo;
@@ -143,26 +136,40 @@ extern "C" bool NvDsInferParseCustomYoloV4(
                   << ", detected by network: " << NUM_CLASSES_YOLO << std::endl;
     }
 
+    const NvDsInferLayerInfo *boxes = NULL;
+    const NvDsInferLayerInfo *scores = NULL;
+    const NvDsInferLayerInfo *num = NULL;
+    const NvDsInferLayerInfo *classes_layer = NULL;
+    int outputLayernum = outputLayersInfo.size();
+    for(int l=0; l<outputLayernum; l++) {
+	if (!strcmp(outputLayersInfo[l].layerName, "num_detections")) {
+            num = &outputLayersInfo[l];
+	}
+        if (!strcmp(outputLayersInfo[l].layerName, "nmsed_boxes")) {
+            boxes = &outputLayersInfo[l];
+	}
+	if (!strcmp(outputLayersInfo[l].layerName, "nmsed_scores")) {
+            scores = &outputLayersInfo[l];
+	}
+	if (!strcmp(outputLayersInfo[l].layerName, "nmsed_classes")) {
+            classes_layer = &outputLayersInfo[l];
+	}
+    }
+    int * num_layer = (int *)num->buffer;
+
     std::vector<NvDsInferParseObjectInfo> objects;
 
-    const NvDsInferLayerInfo &boxes = outputLayersInfo[0]; // num_boxes x 4
-    const NvDsInferLayerInfo &scores = outputLayersInfo[1]; // num_boxes x num_classes
-
-    // 3 dimensional: [num_boxes, 1, 4]
-    assert(boxes.inferDims.numDims == 3);
-    // 2 dimensional: [num_boxes, num_classes]
-    assert(scores.inferDims.numDims == 2);
-
-    // The second dimension should be num_classes
-    assert(detectionParams.numClassesConfigured == scores.inferDims.d[1]);
-    
-    uint num_bboxes = boxes.inferDims.d[0];
+    uint num_bboxes = num_layer[0];
+    // 2 dimensional: [num_bboxes, 4]
+    assert(boxes->inferDims.numDims == 2);
+    // Single dimensional: [num_bboxes]
+    assert(scores->inferDims.numDims == 1);
 
     // std::cout << "Network Info: " << networkInfo.height << "  " << networkInfo.width << std::endl;
 
     std::vector<NvDsInferParseObjectInfo> outObjs =
         decodeYoloV4Tensor(
-            (const float*)(boxes.buffer), (const float*)(scores.buffer), num_bboxes, detectionParams,
+            (const float*)(boxes->buffer), (const float*)(scores->buffer), (const float*)(classes_layer->buffer), num_bboxes, detectionParams,
             networkInfo.width, networkInfo.height);
 
     objects.insert(objects.end(), outObjs.begin(), outObjs.end());
@@ -246,7 +253,7 @@ static bool NvDsInferParseYoloV7(
         float bw = data[ 2];
         float bh = data[ 3];
         float maxProb = data[ 4];
-        int  maxIndex = data[ 5];
+        int  maxIndex;
         float * classes_scores = data + 5;
         
         float maxScore = 0;
@@ -258,7 +265,7 @@ static bool NvDsInferParseYoloV7(
            }
            classes_scores++;
         }
-	
+
         maxIndex = index;
         data += dimensions;
         
@@ -278,6 +285,72 @@ extern "C" bool NvDsInferParseCustomYoloV7(
         outputLayersInfo, networkInfo, detectionParams, objectList);
 }
 
+
+static bool NvDsInferParseYoloV8(
+    std::vector<NvDsInferLayerInfo> const& outputLayersInfo,
+    NvDsInferNetworkInfo const& networkInfo,
+    NvDsInferParseDetectionParams const& detectionParams,
+    std::vector<NvDsInferParseObjectInfo>& objectList)
+{
+    if (outputLayersInfo.empty()) {
+        std::cerr << "Could not find output layer in bbox parsing" << std::endl;;
+        return false;
+    }
+    const NvDsInferLayerInfo &layer = outputLayersInfo[0];
+
+    if (NUM_CLASSES_YOLO != detectionParams.numClassesConfigured)
+    {
+        std::cerr << "WARNING: Num classes mismatch. Configured:"
+                  << detectionParams.numClassesConfigured
+                  << ", detected by network: " << NUM_CLASSES_YOLO << std::endl;
+    }
+
+    std::vector<NvDsInferParseObjectInfo> objects;
+
+    float* data = (float*)layer.buffer;
+    const int dimensions = layer.inferDims.d[1];
+    int rows = layer.inferDims.numElements / layer.inferDims.d[1];
+
+
+    for (int i = 0; i < rows; ++i) {
+        //85 = x, y, w, h, score0......score79
+        float bx = data[ 0];
+        float by = data[ 1];
+        float bw = data[ 2];
+        float bh = data[ 3];
+        float * classes_scores = data + 4;
+
+        float maxScore = 0;
+        int index = 0;
+        for (int j = 0 ;j < NUM_CLASSES_YOLO; j++){
+           if(*classes_scores > maxScore){
+              index = j;
+              maxScore = *classes_scores;
+           }
+           classes_scores++;
+        }
+
+        int maxIndex = index;
+        data += dimensions;
+        float maxProb = 1.0;
+        // share the same addBBoxProposal function
+        addBBoxProposalYoloV7(bx, by, bw, bh, 1, networkInfo.width, networkInfo.height, maxIndex, maxScore, objects);
+
+    }
+    objectList = objects;
+    return true;
+}
+
+extern "C" bool NvDsInferParseCustomYoloV8(
+    std::vector<NvDsInferLayerInfo> const& outputLayersInfo,
+    NvDsInferNetworkInfo const& networkInfo,
+    NvDsInferParseDetectionParams const& detectionParams,
+    std::vector<NvDsInferParseObjectInfo>& objectList)
+{
+    return NvDsInferParseYoloV8 (
+        outputLayersInfo, networkInfo, detectionParams, objectList);
+}
 /* Check that the custom function has been defined correctly */
 CHECK_CUSTOM_PARSE_FUNC_PROTOTYPE(NvDsInferParseCustomYoloV4);
 CHECK_CUSTOM_PARSE_FUNC_PROTOTYPE(NvDsInferParseCustomYoloV7);
+CHECK_CUSTOM_PARSE_FUNC_PROTOTYPE(NvDsInferParseCustomYoloV8);

@@ -45,17 +45,17 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
-class Yolov7 {
+class Yolo {
 public:
     //!
-    //! \brief init Yolov7 class object
+    //! \brief init Yolo class object
     //!
     //! \param engine_path The path of trt engine file
     //!
-    Yolov7(std::string engine_path);
+    Yolo(std::string engine_path);
 
     //!
-    //! \brief preprocess a list of image, the image will remembered inside the class by Yolov7 object
+    //! \brief preprocess a list of image, the image will remembered inside the class by Yolo object
     //!
     //! \param cv_img  input images with BGR-UInt8, the size of the vector must smmaller than the maxBatchsize of the model
     //!
@@ -70,10 +70,9 @@ public:
     //! \brief PostProcess, will decode and nms the batch inference result of yolov7
     //!
     //! \param cv_img  
-    //! \return return all the nms result of Yolov7 
+    //! \return return all the nms result of Yolo 
     //!
-    std::vector<std::vector<std::vector<float>>> PostProcess(float iou_thres = 0.45f, float conf_thres = 0.25f);
-    
+    std::vector<std::vector<std::vector<float>>> PostProcess(float iou_thres = 0.45f, float conf_thres = 0.25f, bool isYolov7 = true);
     //!
     //! \brief Get the input dimenssion of the model
     //!
@@ -93,7 +92,7 @@ public:
     //! \param bgr_img The images need to be drawed with boxes
     //! \param nmsresult nms result get from PostProcess function
     //!
-    static int Yolov7::DrawBoxesonGraph(cv::Mat &bgr_img, std::vector<std::vector<float>> nmsresult);
+    static int Yolo::DrawBoxesonGraph(cv::Mat &bgr_img, std::vector<std::vector<float>> nmsresult);
 
     //!
     //! \brief preprocess a list of image for validate mAP on coco dataset! the model must have a [batchsize, 3, 672, 672] input
@@ -106,7 +105,7 @@ public:
     //! \brief PostProcess for validate mAP on coco dataset!, will decode the batch inference result of yolov7
     //!
     //! \param cv_img  
-    //! \return return all the nms result of Yolov7 
+    //! \return return all the nms result of Yolo 
     //!
     std::vector<std::vector<std::vector<float>>> PostProcess4Validate(float iou_thres = 0.45f, float conf_thres = 0.25f);
 private:
@@ -114,7 +113,8 @@ private:
     int pushImg(void *imgBuffer, int numImg, bool fromCPU = true);
 
     std::vector<std::vector<std::vector<float>>> decode_yolov7_result(float conf_thres);
-    std::vector<std::vector<std::vector<float>>> yolov7_nms(std::vector<std::vector<std::vector<float>>> &bboxes, float iou_thres);
+    std::vector<std::vector<std::vector<float>>> decode_yolov8v9_result(float conf_thres);
+    std::vector<std::vector<std::vector<float>>> yolo_nms(std::vector<std::vector<std::vector<float>>> &bboxes, float iou_thres);
     std::vector<std::vector<float>> nms(std::vector<std::vector<float>> &bboxes, float iou_thres);
     
     //TODO: to be imp

@@ -21,7 +21,7 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
-#include <Yolov7.h>
+#include <Yolo.h>
 #include <vector>
 #include <numeric>
 #include <random>
@@ -44,11 +44,19 @@ std::string parse_model_path(argsParser& cmdLine) {
     return engine_path;
 }
 
+std::string parse_yolov_version(argsParser& cmdLine) {
+    const char* version_str = cmdLine.ParseString("version");
+    std::string version;
+    if (version_str) version = std::string(version_str);
+    return version;
+}
+
 bool print_help() {
     printf("--------------------------------------------------------------------------------------------------------\n");
-    printf("---------------------------- yolov7 images detector ---------------------------------------------\n");
+    printf("---------------------------- yolo images detector ---------------------------------------------\n");
     printf(" '--help': print help information \n");
-    printf(" '--engine=yolov7.engine' Load yolov7 trt-engine  \n");
+    printf(" '--engine=yolo.engine' Load yolo trt-engine  \n");
+    printf(" '--version=v7' Run yolov7/v8/v9, default v7  \n");
     printf(" '--img=img1,jpg,img2.jpg,img3.jpg' specify the path of the images, split by `,`\n");
     return true;
 }
@@ -62,6 +70,14 @@ int main(int argc, char** argv){
 
     std::string engine_path = parse_model_path(cmdLine);
     std::vector<std::string> img_paths = parse_img_paths(cmdLine);
+    std::string yolo_version = parse_yolov_version(cmdLine);
+    bool isYolov7 = true;
+    if(yolo_version == "v8" || yolo_version == "v9"){
+        isYolov7 = false;
+    }
+    else{
+        isYolov7 = true;
+    }
     // print img paths
     std::cout<<"input "<<img_paths.size()<<" images, paths: ";
     for(int i = 0;i < img_paths.size();i++) {
@@ -69,7 +85,7 @@ int main(int argc, char** argv){
     }
     std::cout<<std::endl;
     
-    Yolov7 yolov7(engine_path);
+    Yolo yolo(engine_path);
 
     std::vector<cv::Mat> bgr_imgs;
     for(int i = 0; i< img_paths.size();i++){
@@ -78,18 +94,20 @@ int main(int argc, char** argv){
     
     std::cout<<"preprocess start"<<std::endl;
 
-    yolov7.preProcess(bgr_imgs);
+    yolo.preProcess(bgr_imgs);
     
     std::cout<<"inference start"<<std::endl;
 
-    yolov7.infer();
+    yolo.infer();
 
     std::cout<<"postprocessing start"<<std::endl;
-
-    std::vector<std::vector<std::vector<float>>> nmsresults = yolov7.PostProcess();
-
+    std::vector<std::vector<std::vector<float>>> nmsresults;
+    if(isYolov7) // yolov7
+        nmsresults = yolo.PostProcess(0.45f, 0.25f, isYolov7);
+    else
+        nmsresults = yolo.PostProcess(0.75f, 0.25f, isYolov7);
     for(int j =0; j < nmsresults.size();j++){
-        Yolov7::DrawBoxesonGraph(bgr_imgs[j],nmsresults[j]);
+        Yolo::DrawBoxesonGraph(bgr_imgs[j],nmsresults[j]);
         std::string output_path = img_paths[j] + "detect" + std::to_string(j)+".jpg";      
         cv::imwrite(output_path, bgr_imgs[j]);
         std::cout<<"detectec image written to: "<<output_path<<std::endl;

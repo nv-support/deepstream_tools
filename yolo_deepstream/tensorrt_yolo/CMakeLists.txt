@@ -67,7 +67,7 @@ FILE(GLOB_RECURSE YOLO_SRC src/*.cpp )
 add_library( yolo SHARED ${YOLO_SRC} )
 target_link_libraries(yolo PRIVATE nvinfer)
 target_link_libraries(yolo PRIVATE nvinfer_plugin)
-target_link_libraries(yolo PRIVATE nvparsers)
+# target_link_libraries(yolo PRIVATE nvparsers)
 target_link_libraries(yolo PRIVATE nvonnxparser cudart ${OpenCV_LIBS})
 
 add_executable(detect samples/detect.cpp )
