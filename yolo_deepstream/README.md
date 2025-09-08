@@ -69,7 +69,7 @@ Below table shows the end-to-end performance of processing 1080p videos with thi
 
 ## Onnx model list
 
-we provide the following onnx models
+The following onnx models are provided
 
 
 | model name  | calibrationFile      |Hardware              | resolution  | precision | mAP<sup>val<br>0.5:0.95 |
