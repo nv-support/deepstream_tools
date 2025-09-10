@@ -34,10 +34,12 @@
 static const int NUM_CLASSES_YOLO = 80;
 #define OBJECTLISTSIZEV7 25200
 #define OBJECTLISTSIZEV8 8400
+#define OBJECTLISTSIZEV11 9261
 
 #define BLOCKSIZE 1024
 thrust::device_vector<NvDsInferParseObjectInfo> objects_v7(OBJECTLISTSIZEV7);
 thrust::device_vector<NvDsInferParseObjectInfo> objects_v8(OBJECTLISTSIZEV8);
+thrust::device_vector<NvDsInferParseObjectInfo> objects_v11(OBJECTLISTSIZEV11);
 
 template <bool isYoloV7>
 __global__ void decodeYoloTensor_cuda(NvDsInferParseObjectInfo *binfo,
@@ -160,8 +162,20 @@ bool NvDsInferParseCustomYoloV8_cuda(
   return ret;
 }
 
+bool NvDsInferParseCustomYoloV11_cuda(
+    std::vector<NvDsInferLayerInfo> const &outputLayersInfo,
+    NvDsInferNetworkInfo const &networkInfo,
+    NvDsInferParseDetectionParams const &detectionParams,
+    std::vector<NvDsInferParseObjectInfo> &objectList) {
+  nvtxRangePush("NvDsInferParseYoloV11");
+  bool ret = NvDsInferParseYolo_cuda<false, OBJECTLISTSIZEV11>(
+      outputLayersInfo, networkInfo, detectionParams, objectList, objects_v11);
+  nvtxRangePop();
+  return ret;
+}
 }
 
 /* Check that the custom function has been defined correctly */
 CHECK_CUSTOM_PARSE_FUNC_PROTOTYPE(NvDsInferParseCustomYoloV7_cuda);
 CHECK_CUSTOM_PARSE_FUNC_PROTOTYPE(NvDsInferParseCustomYoloV8_cuda);
+CHECK_CUSTOM_PARSE_FUNC_PROTOTYPE(NvDsInferParseCustomYoloV11_cuda);

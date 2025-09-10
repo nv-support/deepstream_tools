@@ -1,5 +1,5 @@
 ################################################################################
-# SPDX-FileCopyrightText: Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: MIT
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
@@ -21,13 +21,14 @@
 # DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+TARGET_DEVICE = $(shell gcc -dumpmachine | cut -f1 -d -)
 CC:= g++
 NVCC:=/usr/local/cuda/bin/nvcc
 
 CFLAGS:= -Wall -std=c++11 -shared -fPIC -Wno-error=deprecated-declarations
 CFLAGS+= -I/opt/nvidia/deepstream/deepstream/sources/includes/ -I/usr/local/cuda/include
 
-CUFLAGS:= -std=c++14 -shared 
+CUFLAGS:= -std=c++17 -shared 
 CUFLAGS+= -I/opt/nvidia/deepstream/deepstream/sources/includes/ -I/usr/local/cuda/include
 LIBS:= -lnvinfer_plugin -lnvinfer  -L/usr/local/cuda/lib64 -lcudart -lcublas -lstdc++fs
 LFLAGS:= -shared -Wl,--start-group $(LIBS) -Wl,--end-group
@@ -38,6 +39,16 @@ SRCFILES:= nvdsparsebbox_Yolo.cpp\
 
 TARGET_LIB:= libnvdsinfer_custom_impl_Yolo.so
 
+# Gencode arguments
+SMS ?= 75 80 86 89 90 100 120
+$(foreach sm,$(SMS),$(eval GENCODE_FLAGS += -gencode arch=compute_$(sm),code=sm_$(sm)))
+ifeq ($(TARGET_DEVICE),aarch64)
+	GENCODE_FLAGS := 
+else
+	GENCODE_FLAGS := $(GENCODE_FLAGS)
+endif
+
+
 TARGET_OBJS:= $(SRCFILES:.cpp=.o)
 TARGET_OBJS:= $(TARGET_OBJS:.cu=.o)
 
@@ -47,7 +58,7 @@ all: $(TARGET_LIB)
 	$(CC) -c -o $@ $(CFLAGS) $<
 
 %.o: %.cu $(INCS) Makefile
-	$(NVCC) -c -o $@ --compiler-options '-fPIC' $(CUFLAGS)  $<
+	$(NVCC) -c -o $@ $(GENCODE_FLAGS) --compiler-options '-fPIC' $(CUFLAGS)  $<
 
 $(TARGET_LIB) : $(TARGET_OBJS)
 	$(CC) -o $@  $(TARGET_OBJS) $(LFLAGS)

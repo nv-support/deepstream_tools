@@ -9,6 +9,7 @@
 - `config_infer_primary_yoloV8.txt`: Configuration file for the GStreamer nvinfer plugin for the YoloV8 detector model.
 - `config_infer_primary_yoloV8_dla.txt`: Configuration file for the GStreamer nvinfer plugin for the YoloV8 detector model running with DLA on Jetson.
 - `config_infer_primary_yoloV9.txt`: Configuration file for the GStreamer nvinfer plugin for the YoloV9 detector model.
+- `config_infer_primary_yoloV11.txt`: Configuration file for the GStreamer nvinfer plugin for the YoloV11 detector model.
 - `nvdsinfer_custom_impl_Yolo/nvdsparsebbox_Yolo.cpp`: Output layer parsing function for detected objects for the Yolo models.
 - `nvdsinfer_custom_impl_Yolo/nvdsparsebbox_Yolo_cuda.cu`: Output layer parsing function for detected objects for the Yolo models by CUDA.
 
@@ -21,10 +22,11 @@
   $ make
   $ cd ..
 ```
+NOTE: To improve performance on specific GPUs, please add "-gencode=arch=compute_xx,code=sm_xx" in Makefile. Computing capability can be found in this link https://developer.nvidia.com/zh-cn/cuda-gpus#compute.
 
 ## 3. Prepare model and Run with deepstream-app ##
 
-### TIPS: DeepStream 7.0+ is required ###
+### TIPS: DeepStream 7.1+ is required ###
 
 #### Yolov4 
 
@@ -166,6 +168,25 @@ The output result will output to `yolo.mp4`
     $ python append_transpose_yolov8_v9.py
     ```
 
+#### YOLOv11s
+
+- Use the following command to download the yolov11s onnx-model
+
+```bash
+wget https://nvidia.box.com/shared/static/87pt9tlgx588l9j9a9wfdk2yjljjrffn -O yolov11s_qat_int8_672_dynamic.onnx
+```
+
+- Convert model with trtexec
+```bash
+# batch size 16
+/usr/src/tensorrt/bin/trtexec --minShapes=images:1x3x672x672 --optShapes=images:16x3x672x672 --maxShapes=images:16x3x672x672 --onnx=yolov11s_qat_int8_672_dynamic.onnx  --saveEngine=yolov11s_qat_int8_672_dynamic.onnx_b16_gpu0_int8.engine --int8 --fp16 --dumpLayerInfo --profilingVerbosity=detailed --exportLayerInfo=yolov11s_qat_int8_672_dynamic_layer.json --exportProfile=yolov11s_qat_int8_672_dynamic_profile.json
+```
+
+- Modify the [deepstream_app_config_yolo.txt](./deepstream_app_config_yolo.txt) file
+```ini
+config-file=config_infer_primary_yoloV11.txt
+```
+
 - Run
 ```bash
 deepstream-app -c deepstream_app_config_yolo.txt -t
@@ -174,12 +195,12 @@ The output result will output to `yolo.mp4`
 
 ## 4. CUDA Post Processing
 
-this sample provide two ways of yolov7/yolov8/yolov9 post-processing(decode yolo result, not include NMS), CPU version and GPU version
+this sample provide two ways of yolov7/yolov8/yolov9/yolov11 post-processing(decode yolo result, not include NMS), CPU version and GPU version
 - CPU implement can be found in: [nvdsparsebbox_Yolo.cpp](nvdsinfer_custom_impl_Yolo/nvdsparsebbox_Yolo.cpp)
 - CUDA implement can be found in: [nvdsparsebbox_Yolo_cuda.cu](nvdsinfer_custom_impl_Yolo/nvdsparsebbox_Yolo_cuda.cu)
 
 Default will use CUDA-post processing. To enable CPU post-processing:
-in [config_infer_primary_yoloV7.txt](config_infer_primary_yoloV7.txt), [config_infer_primary_yoloV8.txt](config_infer_primary_yoloV8.txt) or  [config_infer_primary_yoloV9.txt](config_infer_primary_yoloV9.txt)
+in [config_infer_primary_yoloV7.txt](config_infer_primary_yoloV7.txt), [config_infer_primary_yoloV8.txt](config_infer_primary_yoloV8.txt), [config_infer_primary_yoloV9.txt](config_infer_primary_yoloV9.txt) or [config_infer_primary_yoloV11.txt](config_infer_primary_yoloV11.txt)
 
 - `parse-bbox-func-name=NvDsInferParseCustomYoloV7_cuda` -> `parse-bbox-func-name=NvDsInferParseCustomYoloV7`
 - `disable-output-host-copy=1` -> `disable-output-host-copy=0`
