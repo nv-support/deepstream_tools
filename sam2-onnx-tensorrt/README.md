@@ -83,6 +83,8 @@ The following tables show the input/output specifications for each network modul
 Below script will install SAM2 dependencies, download the SAM2 model checkpoints and export them to ONNX files. The ONNX files are saved in `checkpoints/${MODEL_TYPE}` directory.
 
 ```bash
+# this script will install Python dependencies and export ONNX models
+# better to run it in a Python virtual environment or docker container.
 bash run.sh
 ```
 

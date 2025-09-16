@@ -1,0 +1,6 @@
+sam2-onnx-tensorrt/*.pt
+sam2-onnx-tensorrt/*.onnx
+*__pycache__*
+sam2-onnx-tensorrt/SAM_2.egg-info/
+*_C.so
+sam2-onnx-tensorrt/build/
